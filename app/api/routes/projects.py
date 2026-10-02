@@ -81,6 +81,7 @@ async def project_detail(project: dict, storage: Storage) -> ProjectDetail:
             for p in photos
         ],
         totals=whole_house_totals(photos, [s for rows in segments_by_photo.values() for s in rows]),
+        variants=project.get("variants", []),
     )
 
 

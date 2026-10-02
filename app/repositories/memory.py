@@ -9,6 +9,7 @@ import copy
 import uuid
 from datetime import datetime, timezone
 
+from app.catalog import MATERIALS
 from app.repositories.base import RepositoryError
 
 PHOTO_SUMMARY_FIELDS = ("id", "elevation", "is_primary", "status", "thumbnail_path", "created_at")
@@ -24,6 +25,13 @@ class MemoryStore:
         self.photos: dict[str, dict] = {}
         self.jobs: dict[str, dict] = {}
         self.segments: dict[str, dict] = {}
+        self.variants: dict[str, dict] = {}
+        self.assignments: dict[tuple[str, str], dict] = {}  # (variant_id, segment_id) → row
+
+    def drop_assignments(self, keep) -> None:
+        """Mimic ON DELETE CASCADE from segments / variants to segment_materials."""
+        for key in [k for k, row in self.assignments.items() if not keep(row)]:
+            del self.assignments[key]
 
 
 class MemoryRepository:
@@ -85,6 +93,11 @@ class MemoryRepository:
             (copy.deepcopy(s) for s in self._store.segments.values() if s["project_id"] == row["id"]),
             key=lambda s: (s["label"], s["created_at"]),
         )
+        row["variants"] = [
+            self._variant_with_assignments(v)
+            for v in sorted(self._store.variants.values(), key=lambda v: v["created_at"])
+            if v["project_id"] == row["id"]
+        ]
         return row
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None:
@@ -99,9 +112,10 @@ class MemoryRepository:
             return False
         project_id = str(project_id)
         del self._store.projects[project_id]
-        for table in (self._store.photos, self._store.jobs, self._store.segments):
+        for table in (self._store.photos, self._store.jobs, self._store.segments, self._store.variants):
             for key in [k for k, v in table.items() if v["project_id"] == project_id]:
                 del table[key]
+        self._store.drop_assignments(lambda a: a["variant_id"] in self._store.variants)
         return True
 
     # ── Photos ──
@@ -147,6 +161,7 @@ class MemoryRepository:
         for table in (self._store.jobs, self._store.segments):
             for key in [k for k, v in table.items() if v["photo_id"] == photo["id"]]:
                 del table[key]
+        self._store.drop_assignments(lambda a: a["segment_id"] in self._store.segments)
         return True
 
     # ── Jobs ──
@@ -196,6 +211,7 @@ class MemoryRepository:
         if segment is None:
             return False
         del self._store.segments[segment["id"]]
+        self._store.drop_assignments(lambda a: a["segment_id"] in self._store.segments)
         return True
 
     async def confirm_segments(self, photo_id: str) -> None:
@@ -212,8 +228,79 @@ class MemoryRepository:
         for key in [k for k, s in self._store.segments.items()
                     if s["photo_id"] == photo["id"] and s["source"] == "auto"]:
             del self._store.segments[key]
+        self._store.drop_assignments(lambda a: a["segment_id"] in self._store.segments)
         for segment in segments:
             row = {"id": str(uuid.uuid4()), "source": "auto", "confidence": None, "area_sqm": None,
                    "length_m": None, "scale_source": None, "user_dimension": None, "depth_stats": None,
                    "is_confirmed": False, "created_at": _now(), **copy.deepcopy(segment)}
             self._store.segments[row["id"]] = row
+
+    # ── Materials & design variants ──
+
+    async def list_materials(self) -> list[dict]:
+        active = [m for m in MATERIALS if m["is_active"]]
+        return copy.deepcopy(sorted(active, key=lambda m: (m["category"], m["name"])))
+
+    def _variant_with_assignments(self, variant: dict) -> dict:
+        assignments = [copy.deepcopy(a) for a in self._store.assignments.values() if a["variant_id"] == variant["id"]]
+        return {**copy.deepcopy(variant), "assignments": assignments}
+
+    def _owned_variant(self, variant_id) -> dict | None:
+        variant = self._store.variants.get(str(variant_id))
+        return variant if variant and self._owned(variant["project_id"]) else None
+
+    async def create_variant(self, variant: dict) -> dict:
+        if self._owned(variant["project_id"]) is None:
+            raise RepositoryError("new row violates row-level security policy", 403, "42501")
+        self._check_unique_name(str(variant["project_id"]), variant["name"])
+        now = _now()
+        row = {"id": str(uuid.uuid4()), "rendered_image_path": None, "created_at": now, "updated_at": now,
+               **copy.deepcopy(variant)}
+        row["project_id"] = str(row["project_id"])
+        self._store.variants[row["id"]] = row
+        return self._variant_with_assignments(row)
+
+    async def get_variant(self, variant_id: str) -> dict | None:
+        variant = self._owned_variant(variant_id)
+        return self._variant_with_assignments(variant) if variant else None
+
+    def _check_unique_name(self, project_id: str, name: str, ignore_id: str | None = None) -> None:
+        if any(v["project_id"] == project_id and v["name"] == name and v["id"] != ignore_id
+               for v in self._store.variants.values()):
+            raise RepositoryError("duplicate key value violates design_variants_project_name_idx", 409, "23505")
+
+    async def update_variant(self, variant_id: str, fields: dict) -> dict | None:
+        variant = self._owned_variant(variant_id)
+        if variant is None:
+            return None
+        if "name" in fields:
+            self._check_unique_name(variant["project_id"], fields["name"], variant["id"])
+        variant.update(copy.deepcopy(fields), updated_at=_now())
+        return copy.deepcopy(variant)
+
+    async def delete_variant(self, variant_id: str) -> bool:
+        variant = self._owned_variant(variant_id)
+        if variant is None:
+            return False
+        del self._store.variants[variant["id"]]
+        self._store.drop_assignments(lambda a: a["variant_id"] in self._store.variants)
+        return True
+
+    async def upsert_assignments(self, rows: list[dict]) -> None:
+        for row in rows:
+            if self._owned_variant(row["variant_id"]) is None or self._owned_segment(row["segment_id"]) is None:
+                raise RepositoryError("new row violates row-level security policy", 403, "42501")
+            key = (str(row["variant_id"]), str(row["segment_id"]))
+            existing = self._store.assignments.get(key, {"id": str(uuid.uuid4())})
+            self._store.assignments[key] = {**existing, **copy.deepcopy(row), "variant_id": key[0], "segment_id": key[1]}
+
+    async def delete_assignments(self, variant_id: str, segment_ids: list[str]) -> None:
+        if self._owned_variant(variant_id) is None:
+            return
+        for segment_id in segment_ids:
+            self._store.assignments.pop((str(variant_id), str(segment_id)), None)
+
+    async def delete_segment_assignments(self, segment_id: str) -> None:
+        if self._owned_segment(segment_id) is None:
+            return
+        self._store.drop_assignments(lambda a: a["segment_id"] != str(segment_id))

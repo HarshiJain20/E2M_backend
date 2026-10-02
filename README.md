@@ -34,8 +34,20 @@ Open Supabase Dashboard → **SQL Editor** → **New query**, paste the whole of
 Security policies, the private `project-images` bucket and its storage policies. It is safe to run
 again after changes.
 
+Then run [`supabase/seed_materials.sql`](supabase/seed_materials.sql) to load the material catalog
+(safe to re-run; it updates rates in place).
+
 **Already ran an earlier `schema.sql`?** Run the files in `supabase/migrations/` you have not run
-yet, in order (e.g. `002_photos.sql`), instead of `schema.sql`.
+yet, in order (`002_photos.sql`, `003_measurement.sql`, `004_materials.sql`), then `seed_materials.sql`.
+
+### Material catalog
+
+The catalog lives in [`app/catalog.py`](app/catalog.py): 14 materials (paints, texture, plaster,
+stone, tiles, ACP/HPL panels, MS/SS/glass railings) with material and labour rates, coverage or unit
+size, wastage, the parts of the house each suits, and suitability / maintenance / durability notes.
+Rates are **indicative**: three follow CPWD DSR 2021 items (13.46.1, 13.45.1, 13.1), the rest are
+market estimates — check them against the current DSR or local quotes. After editing the catalog,
+regenerate the SQL with `python -m scripts.generate_seed_sql` and run it in the SQL Editor.
 
 ### 2. Install and configure
 
@@ -123,13 +135,21 @@ request layer, so they run offline.
 | PUT | `/api/v1/photos/{id}/reference` | Your measurement of one region (`segment_id`, `dimension`: height/width, `metres`) — rescales the photo |
 | DELETE | `/api/v1/photos/{id}/reference` | Remove your measurement |
 | PATCH | `/api/v1/segments/{id}` | Change what a region is (`label`) |
+| PUT | `/api/v1/segments/{id}/size` | Exact size you measured: `{width_m, height_m}` or `{area_sqm}` (surfaces), `{length_m}` (railings, roof edges) |
+| DELETE | `/api/v1/segments/{id}/size` | Go back to the estimated size |
 | DELETE | `/api/v1/segments/{id}` | Delete a wrong region |
+| GET | `/api/v1/materials` | Material catalog |
+| POST | `/api/v1/projects/{id}/variants` | New design (`name`, optional `copy_from` to duplicate) |
+| PATCH / DELETE | `/api/v1/variants/{id}` | Rename / delete a design |
+| PUT | `/api/v1/variants/{id}/assignments` | Apply a material (and paint colour) to regions: `segment_ids`, `material_id`, `color` |
+| DELETE | `/api/v1/variants/{id}/assignments?segment_ids=…` | Remove the material from regions |
 | GET | `/api/v1/jobs/{id}` | Job status and progress |
 
 **How sizes are measured** (`app/services/measurement.py`): sizes are recomputed from each
 region's outline on every read, using one scale per photo, best source first — your measurement →
 standard door height 2.1 m (else window height 1.2 m) → depth model distance ÷ focal length →
-assumed 10 m distance (flagged). Walls are reported net of the windows and doors inside them.
+assumed 10 m distance (flagged). A region you measured exactly uses your size instead.
+Walls are reported net of the windows and doors inside them.
 Surfaces are treated as facing the camera, so photos taken at an angle under-estimate area.
 
 **Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).

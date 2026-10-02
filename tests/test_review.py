@@ -131,3 +131,55 @@ def test_deleting_the_measured_region_drops_the_measurement(client):
     after = client.delete(f"/api/v1/segments/{wall['id']}").json()["photos"][0]
 
     assert after["reference"] is None and after["scale"]["source"] == "assumed"
+
+
+def test_exact_size_for_a_region(client):
+    photo = new_project(client)["photos"][0]
+    wall, railing = region(photo, "wall"), region(photo, "railing")
+
+    updated = client.put(f"/api/v1/segments/{wall['id']}/size", json={"width_m": 10, "height_m": 6}).json()
+    updated = client.put(f"/api/v1/segments/{railing['id']}/size", json={"length_m": 4.5}).json()
+
+    p = updated["photos"][0]
+    assert region(p, "wall")["area_sqm"] == 60 and region(p, "wall")["size_source"] == "user"
+    assert region(p, "wall")["user_size"] == {"width_m": 10, "height_m": 6}
+    assert region(p, "railing")["length_m"] == 4.5
+    totals = {t["label"]: t["total"] for t in updated["totals"]}
+    assert totals["wall"] == 60 and totals["railing"] == 4.5
+
+    cleared = client.delete(f"/api/v1/segments/{wall['id']}/size").json()["photos"][0]
+    assert region(cleared, "wall")["size_source"] == "estimated"
+
+
+@pytest.mark.parametrize("body", [
+    {"width_m": 10},                       # incomplete
+    {"width_m": 10, "height_m": 6, "area_sqm": 60},  # two ways at once
+    {"length_m": 4},                       # a length for a surface
+    {"area_sqm": -1},
+])
+def test_invalid_exact_sizes_are_rejected(client, body):
+    wall = region(new_project(client)["photos"][0], "wall")
+    assert client.put(f"/api/v1/segments/{wall['id']}/size", json=body).status_code == 422
+
+
+def test_area_for_a_railing_is_rejected(client):
+    railing = region(new_project(client)["photos"][0], "railing")
+    assert client.put(f"/api/v1/segments/{railing['id']}/size", json={"area_sqm": 3}).status_code == 422
+
+
+def test_changing_area_to_length_clears_the_exact_size(client):
+    photo = new_project(client)["photos"][0]
+    wall = region(photo, "wall")
+    client.put(f"/api/v1/segments/{wall['id']}/size", json={"area_sqm": 50})
+
+    updated = client.patch(f"/api/v1/segments/{wall['id']}", json={"label": "railing"}).json()
+
+    changed = next(s for s in updated["photos"][0]["segments"] if s["id"] == wall["id"])
+    assert changed["user_size"] is None and changed["size_source"] == "estimated" and changed["length_m"] > 0
+
+
+def test_exact_sizes_are_private(client):
+    wall = region(new_project(client)["photos"][0], "wall")
+    client.as_user(USER_B)
+    assert client.put(f"/api/v1/segments/{wall['id']}/size", json={"area_sqm": 5}).status_code == 404
+    assert client.delete(f"/api/v1/segments/{wall['id']}/size").status_code == 404

@@ -70,8 +70,9 @@ class SupabaseRepository:
             "projects",
             params={
                 "id": f"eq.{project_id}",
-                "select": "*,photos(*,jobs(*)),segments(*)",
+                "select": "*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*))",
                 "photos.order": "created_at.asc",
+                "design_variants.order": "created_at.asc",
                 "photos.jobs.order": "created_at.desc",
                 "photos.jobs.limit": "1",
                 "segments.order": "label.asc,created_at.asc",
@@ -83,6 +84,10 @@ class SupabaseRepository:
         for photo in row["photos"]:
             jobs = photo.pop("jobs", [])
             photo["latest_job"] = jobs[0] if jobs else None
+        variants = row.pop("design_variants", [])
+        for variant in variants:
+            variant["assignments"] = variant.pop("segment_materials", [])
+        row["variants"] = variants
         return row
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None:
@@ -157,3 +162,52 @@ class SupabaseRepository:
         )
         if segments:
             await self._request("POST", "segments", json=segments)
+
+    # ── Materials & design variants ──
+
+    async def list_materials(self) -> list[dict]:
+        return await self._request(
+            "GET", "materials", params={"select": "*", "is_active": "eq.true", "order": "category.asc,name.asc"}
+        )
+
+    async def create_variant(self, variant: dict) -> dict:
+        rows = await self._request("POST", "design_variants", json=variant, headers=RETURN_ROWS)
+        return {**rows[0], "assignments": []}
+
+    async def get_variant(self, variant_id: str) -> dict | None:
+        rows = await self._request(
+            "GET", "design_variants", params={"id": f"eq.{variant_id}", "select": "*,segment_materials(*)"}
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        row["assignments"] = row.pop("segment_materials", [])
+        return row
+
+    async def update_variant(self, variant_id: str, fields: dict) -> dict | None:
+        rows = await self._request(
+            "PATCH", "design_variants", params={"id": f"eq.{variant_id}"}, json=fields, headers=RETURN_ROWS
+        )
+        return rows[0] if rows else None
+
+    async def delete_variant(self, variant_id: str) -> bool:
+        rows = await self._request(
+            "DELETE", "design_variants", params={"id": f"eq.{variant_id}"}, headers=RETURN_ROWS
+        )
+        return bool(rows)
+
+    async def upsert_assignments(self, rows: list[dict]) -> None:
+        if rows:
+            await self._request(
+                "POST", "segment_materials", params={"on_conflict": "variant_id,segment_id"}, json=rows,
+                headers={"Prefer": "resolution=merge-duplicates"},
+            )
+
+    async def delete_assignments(self, variant_id: str, segment_ids: list[str]) -> None:
+        if segment_ids:
+            await self._request("DELETE", "segment_materials", params={
+                "variant_id": f"eq.{variant_id}", "segment_id": f"in.({','.join(segment_ids)})",
+            })
+
+    async def delete_segment_assignments(self, segment_id: str) -> None:
+        await self._request("DELETE", "segment_materials", params={"segment_id": f"eq.{segment_id}"})

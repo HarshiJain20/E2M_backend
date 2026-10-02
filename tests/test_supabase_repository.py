@@ -51,17 +51,19 @@ def test_list_flattens_segment_counts():
 
 def test_get_project_embeds_photos_with_latest_job_and_segments():
     row = {"id": "p1", "photos": [{"id": "ph1", "jobs": [{"id": "j2"}]}, {"id": "ph2", "jobs": []}],
-           "segments": [{"id": "s1"}]}
+           "segments": [{"id": "s1"}],
+           "design_variants": [{"id": "v1", "name": "Design A", "segment_materials": [{"segment_id": "s1"}]}]}
     calls, transport = recorder(lambda r: httpx.Response(200, json=[row]))
 
     project = asyncio.run(SupabaseRepository(SETTINGS, "t", transport=transport).get_project("p1"))
 
     params = calls[0].url.params
     assert params["id"] == "eq.p1"
-    assert params["select"] == "*,photos(*,jobs(*)),segments(*)"
+    assert params["select"] == "*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*))"
     assert params["photos.jobs.order"] == "created_at.desc" and params["photos.jobs.limit"] == "1"
     assert [p["latest_job"] for p in project["photos"]] == [{"id": "j2"}, None]
     assert project["segments"] == [{"id": "s1"}]
+    assert project["variants"] == [{"id": "v1", "name": "Design A", "assignments": [{"segment_id": "s1"}]}]
 
 
 def test_project_hidden_by_rls_is_none():
@@ -107,3 +109,19 @@ def test_storage_signs_urls_as_the_user():
 
     assert calls[0].headers["authorization"] == "Bearer user-jwt"
     assert urls == {"u/p/thumb.jpg": "https://ref.supabase.co/storage/v1/object/sign/project-images/u/p/thumb.jpg?token=x"}
+
+
+def test_assignments_upsert_on_variant_and_segment():
+    calls, transport = recorder(lambda r: httpx.Response(201))
+
+    asyncio.run(SupabaseRepository(SETTINGS, "t", transport=transport)
+                .upsert_assignments([{"variant_id": "v1", "segment_id": "s1", "material_id": "m1"}]))
+
+    assert calls[0].url.params["on_conflict"] == "variant_id,segment_id"
+    assert calls[0].headers["prefer"] == "resolution=merge-duplicates"
+
+
+def test_delete_assignments_filters_by_segment_list():
+    calls, transport = recorder(lambda r: httpx.Response(204))
+    asyncio.run(SupabaseRepository(SETTINGS, "t", transport=transport).delete_assignments("v1", ["s1", "s2"]))
+    assert calls[0].url.params["segment_id"] == "in.(s1,s2)"

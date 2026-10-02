@@ -87,6 +87,7 @@ create index if not exists segments_photo_id_idx on public.segments (photo_id);
 create table if not exists public.materials (
   id             uuid primary key default gen_random_uuid(),
   sor_code       text,
+  rate_source    text,
   name           text not null,
   category       text not null,
   description    text,
@@ -101,7 +102,10 @@ create table if not exists public.materials (
   durability     text,
   texture_ref    text,
   render_prompt  text,
-  is_active      boolean not null default true
+  is_active      boolean not null default true,
+  applies_to     text[] not null default '{}'::text[],
+  colorable      boolean not null default false,
+  swatch         text
 );
 
 create table if not exists public.design_variants (
@@ -113,12 +117,14 @@ create table if not exists public.design_variants (
   updated_at          timestamptz not null default now()
 );
 create index if not exists design_variants_project_id_idx on public.design_variants (project_id);
+create unique index if not exists design_variants_project_name_idx on public.design_variants (project_id, name);
 
 create table if not exists public.segment_materials (
   id          uuid primary key default gen_random_uuid(),
   variant_id  uuid not null references public.design_variants (id) on delete cascade,
   segment_id  uuid not null references public.segments (id) on delete cascade,
   material_id uuid not null references public.materials (id),
+  color       text,
   unique (variant_id, segment_id)
 );
 
@@ -291,6 +297,8 @@ create policy "project-images: delete own" on storage.objects
   for delete to authenticated
   using (bucket_id = 'project-images' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
+
+-- Next: run supabase/seed_materials.sql to load the material catalog.
 
 -- Make the new tables visible to the Data API immediately.
 notify pgrst, 'reload schema';

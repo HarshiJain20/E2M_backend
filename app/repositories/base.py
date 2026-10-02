@@ -26,7 +26,8 @@ class Repository(Protocol):
         """Newest first; each row has `photos` (summary fields) and `segment_count`."""
 
     async def get_project(self, project_id: str) -> dict | None:
-        """Row plus `photos` (oldest first, each with `latest_job`) and `segments`."""
+        """Row plus `photos` (oldest first, each with `latest_job`), `segments` and
+        `variants` (oldest first, each with `assignments`)."""
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None: ...
 
@@ -60,3 +61,24 @@ class Repository(Protocol):
 
     async def replace_auto_segments(self, photo_id: str, segments: list[dict]) -> None:
         """Delete the photo's auto-detected segments and insert new ones."""
+
+    # ── Materials & design variants ──
+    async def list_materials(self) -> list[dict]:
+        """Active catalog entries (readable by every signed-in user)."""
+
+    async def create_variant(self, variant: dict) -> dict: ...
+
+    async def get_variant(self, variant_id: str) -> dict | None:
+        """Row plus `assignments`."""
+
+    async def update_variant(self, variant_id: str, fields: dict) -> dict | None: ...
+
+    async def delete_variant(self, variant_id: str) -> bool: ...
+
+    async def upsert_assignments(self, rows: list[dict]) -> None:
+        """Set the material (and colour) of segments in a variant; one row per (variant, segment)."""
+
+    async def delete_assignments(self, variant_id: str, segment_ids: list[str]) -> None: ...
+
+    async def delete_segment_assignments(self, segment_id: str) -> None:
+        """Remove a segment's material in every variant (e.g. after it is relabelled)."""

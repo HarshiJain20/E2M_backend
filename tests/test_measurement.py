@@ -99,3 +99,23 @@ def test_focal_length_prefers_model_then_exif_then_typical_phone():
 def test_point_in_polygon():
     square = [[0, 0], [1, 0], [1, 1], [0, 1]]
     assert point_in_polygon(0.5, 0.5, square) and not point_in_polygon(1.5, 0.5, square)
+
+
+def test_exact_user_sizes_replace_estimates():
+    wall = {**WALL, "user_dimension": {"width_m": 12.0, "height_m": 6.5}}
+    door = {**DOOR, "user_dimension": {"area_sqm": 2.0}}
+    railing = {**RAILING, "user_dimension": {"length_m": 5.25}}
+
+    s = by_id(measure_photo(PHOTO, [wall, door, WINDOW, railing])[0])
+
+    assert s["wall"]["area_sqm"] == 78.0 and s["wall"]["size_source"] == "user"
+    assert s["door"]["area_sqm"] == 2.0 and s["railing"]["length_m"] == 5.25
+    assert s["window"]["size_source"] == "estimated"
+    # Openings are still subtracted from a wall the user measured whole.
+    assert s["wall"]["net_area_sqm"] == pytest.approx(78.0 - 2.0 - s["window"]["area_sqm"], abs=0.01)
+
+
+def test_user_size_of_the_wrong_type_is_ignored():
+    railing = {**RAILING, "user_dimension": {"area_sqm": 9.0}}  # an area on a length element
+    s = by_id(measure_photo(PHOTO, [railing, DOOR])[0])
+    assert s["railing"]["size_source"] == "estimated"

@@ -11,6 +11,8 @@ Scale (metres per pixel), best source first:
   3. depth     — the depth model's distance to each region ÷ the camera focal length
   4. assumed   — 10 m camera distance with a typical phone lens (flagged as low accuracy)
 
+A region the user measured exactly (segments.user_dimension) uses that size instead.
+
 All sources assume each surface roughly faces the camera; see the limitations notes.
 Walls are reported net of the windows and doors that sit inside them.
 """
@@ -39,6 +41,18 @@ class Scale:
         if self.metres_per_px is not None:
             return self.metres_per_px
         return (segment.get("depth_stats") or {}).get("median_m", ASSUMED_DISTANCE_M) / focal_px
+
+
+def user_size(segment: dict, kind: str) -> float | None:
+    """The user's exact size for this region, if it matches the region's type."""
+    size = segment.get("user_dimension") or {}
+    if kind == "length":
+        return size.get("length_m")
+    if size.get("area_sqm"):
+        return size["area_sqm"]
+    if size.get("width_m") and size.get("height_m"):
+        return size["width_m"] * size["height_m"]
+    return None
 
 
 def pixel_extent(segment: dict, dimension: str, width: int, height: int) -> float:
@@ -117,11 +131,17 @@ def measure_photo(photo: dict, segments: list[dict]) -> tuple[list[dict], Scale]
     for segment in segments:
         metres_per_px = scale.for_segment(segment, focal)
         kind = measure_type(segment["label"])
-        row = {**segment, "measure_type": kind, "area_sqm": None, "length_m": None, "scale_source": scale.source}
+        row = {**segment, "measure_type": kind, "area_sqm": None, "length_m": None, "scale_source": scale.source,
+               "size_source": "estimated", "user_size": segment.get("user_dimension")}
+        exact = user_size(segment, kind)
         if kind == "length":
-            row["length_m"] = round(pixel_run(segment, width, height) * metres_per_px, 2)
+            value = exact if exact is not None else pixel_run(segment, width, height) * metres_per_px
+            row["length_m"] = round(value, 2)
         else:
-            row["area_sqm"] = round(pixel_area(segment, width, height) * metres_per_px**2, 2)
+            value = exact if exact is not None else pixel_area(segment, width, height) * metres_per_px**2
+            row["area_sqm"] = round(value, 2)
+        if exact is not None:
+            row["size_source"] = "user"
         measured.append(row)
 
     # Deduct each window/door from the (largest) wall that contains its centre.
