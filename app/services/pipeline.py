@@ -81,6 +81,7 @@ async def run_analysis(job_id: str, photo: dict, repo: Repository, storage: Stor
                 "depth": result.get("depth"),
                 "timings_ms": result.get("timings_ms"),
                 "models": result.get("models"),
+                "warnings": result.get("warnings", []),
                 "segment_count": len(result["segments"]),
             },
         })

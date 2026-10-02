@@ -21,3 +21,12 @@ class JobStatus:
 ELEVATIONS = ("front", "left", "right", "rear", "other")
 
 MAX_PHOTOS_PER_PROJECT = 8
+
+# Building elements the AI service detects (requirement 5.2). Railings and roof edges are
+# measured by length, everything else by area.
+LABELS = ("wall", "window", "door", "balcony", "pillar", "parapet", "gate", "roof_edge", "railing")
+LENGTH_LABELS = ("railing", "roof_edge")
+
+
+def measure_type(label: str) -> str:
+    return "length" if label in LENGTH_LABELS else "area"

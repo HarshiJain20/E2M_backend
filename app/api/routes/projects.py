@@ -68,6 +68,8 @@ async def project_detail(project: dict, storage: Storage) -> ProjectDetail:
                 image_url=urls.get(p["working_image_path"]),
                 thumbnail_url=urls.get(p["thumbnail_path"]),
                 segments=segments_by_photo.get(str(p["id"]), []),
+                regions_confirmed=bool(segments_by_photo.get(str(p["id"])))
+                and all(s["is_confirmed"] for s in segments_by_photo[str(p["id"])]),
             )
             for p in photos
         ],

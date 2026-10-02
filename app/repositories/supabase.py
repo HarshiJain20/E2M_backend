@@ -134,6 +134,23 @@ class SupabaseRepository:
 
     # ── Segments ──
 
+    async def get_segment(self, segment_id: str) -> dict | None:
+        rows = await self._request("GET", "segments", params={"id": f"eq.{segment_id}", "select": "*"})
+        return rows[0] if rows else None
+
+    async def update_segment(self, segment_id: str, fields: dict) -> dict | None:
+        rows = await self._request(
+            "PATCH", "segments", params={"id": f"eq.{segment_id}"}, json=fields, headers=RETURN_ROWS
+        )
+        return rows[0] if rows else None
+
+    async def delete_segment(self, segment_id: str) -> bool:
+        rows = await self._request("DELETE", "segments", params={"id": f"eq.{segment_id}"}, headers=RETURN_ROWS)
+        return bool(rows)
+
+    async def confirm_segments(self, photo_id: str) -> None:
+        await self._request("PATCH", "segments", params={"photo_id": f"eq.{photo_id}"}, json={"is_confirmed": True})
+
     async def replace_auto_segments(self, photo_id: str, segments: list[dict]) -> None:
         await self._request(
             "DELETE", "segments", params={"photo_id": f"eq.{photo_id}", "source": "eq.auto"}

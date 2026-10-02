@@ -53,7 +53,8 @@ All settings live in `config.json` (gitignored; `config.example.json` is the tem
 | `supabase.url` | `https://<project-ref>.supabase.co` |
 | `supabase.publishable_key` | Dashboard → Project Settings → **API Keys** → publishable key (`sb_publishable_…`) |
 | `supabase.storage_bucket` | Photo bucket created by `schema.sql` (`project-images`) |
-| `ai_geometry.url` | Base URL of the E2M_ai-geometry service |
+| `ai_geometry.url` | Base URL of the E2M_ai-geometry service (the Kaggle tunnel URL when running there) |
+| `ai_geometry.api_key` | Must match `auth.api_key` of the AI service (printed by the Kaggle notebook) |
 | `app.cors_origins` | Frontend origins allowed to call the API |
 | `storage.backend` | `supabase`, or `local` for offline development |
 | `auth.disabled` | `true` only for offline development (fixed dev user) |
@@ -118,6 +119,9 @@ request layer, so they run offline.
 | PATCH | `/api/v1/photos/{id}` | Change side (`elevation`) or make it the counted photo (`is_primary: true`) |
 | DELETE | `/api/v1/photos/{id}` | Remove a photo (409 for the last one) |
 | POST | `/api/v1/photos/{id}/analyze` | Re-run analysis for a photo (409 if one is running) |
+| POST | `/api/v1/photos/{id}/confirm` | Mark the photo's regions as reviewed |
+| PATCH | `/api/v1/segments/{id}` | Change what a region is (`label`) |
+| DELETE | `/api/v1/segments/{id}` | Delete a wrong region |
 | GET | `/api/v1/jobs/{id}` | Job status and progress |
 
 **Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).

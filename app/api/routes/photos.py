@@ -70,6 +70,18 @@ async def delete_photo(
     return await project_detail(await owned_project(project_id, repo), storage)
 
 
+@router.post("/{photo_id}/confirm", response_model=ProjectDetail)
+async def confirm_regions(
+    photo_id: uuid.UUID,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> ProjectDetail:
+    """The user has reviewed this photo's regions (requirement 5.2)."""
+    photo = await _owned_photo(photo_id, repo)
+    await repo.confirm_segments(str(photo_id))
+    return await project_detail(await owned_project(str(photo["project_id"]), repo), storage)
+
+
 @router.post("/{photo_id}/analyze", status_code=status.HTTP_202_ACCEPTED, response_model=JobOut)
 async def analyze_photo(
     photo_id: uuid.UUID,

@@ -175,6 +175,35 @@ class MemoryRepository:
 
     # ── Segments ──
 
+    def _owned_segment(self, segment_id) -> dict | None:
+        segment = self._store.segments.get(str(segment_id))
+        return segment if segment and self._owned(segment["project_id"]) else None
+
+    async def get_segment(self, segment_id: str) -> dict | None:
+        segment = self._owned_segment(segment_id)
+        return copy.deepcopy(segment) if segment else None
+
+    async def update_segment(self, segment_id: str, fields: dict) -> dict | None:
+        segment = self._owned_segment(segment_id)
+        if segment is None:
+            return None
+        segment.update(copy.deepcopy(fields))
+        return copy.deepcopy(segment)
+
+    async def delete_segment(self, segment_id: str) -> bool:
+        segment = self._owned_segment(segment_id)
+        if segment is None:
+            return False
+        del self._store.segments[segment["id"]]
+        return True
+
+    async def confirm_segments(self, photo_id: str) -> None:
+        if self._owned_photo(photo_id) is None:
+            return
+        for segment in self._store.segments.values():
+            if segment["photo_id"] == str(photo_id):
+                segment["is_confirmed"] = True
+
     async def replace_auto_segments(self, photo_id: str, segments: list[dict]) -> None:
         photo = self._owned_photo(photo_id)
         if photo is None:

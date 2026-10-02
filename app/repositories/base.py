@@ -49,5 +49,14 @@ class Repository(Protocol):
     async def update_job(self, job_id: str, fields: dict) -> dict | None: ...
 
     # ── Segments ──
+    async def get_segment(self, segment_id: str) -> dict | None: ...
+
+    async def update_segment(self, segment_id: str, fields: dict) -> dict | None: ...
+
+    async def delete_segment(self, segment_id: str) -> bool: ...
+
+    async def confirm_segments(self, photo_id: str) -> None:
+        """Mark every segment of the photo as reviewed by the user."""
+
     async def replace_auto_segments(self, photo_id: str, segments: list[dict]) -> None:
         """Delete the photo's auto-detected segments and insert new ones."""

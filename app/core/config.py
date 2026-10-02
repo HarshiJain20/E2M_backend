@@ -53,6 +53,8 @@ class AuthConfig(BaseModel):
 
 class AIGeometryConfig(BaseModel):
     url: str = "http://localhost:8100"
+    # Must match auth.api_key in the AI service's config (required when it runs on Kaggle).
+    api_key: str = ""
     timeout_seconds: float = 300.0
 
 

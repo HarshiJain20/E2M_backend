@@ -76,6 +76,7 @@ class PhotoOut(BaseModel):
     quality_report: QualityReportOut
     latest_job: JobOut | None = None
     segments: list[SegmentOut] = []
+    regions_confirmed: bool = False  # the user reviewed this photo's regions
     created_at: UtcDatetime
 
 
@@ -105,6 +106,10 @@ class ProjectDetail(ProjectSummary):
 
 class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+
+
+class SegmentUpdate(BaseModel):
+    label: Literal["wall", "window", "door", "balcony", "pillar", "parapet", "gate", "roof_edge", "railing"]
 
 
 class PhotoUpdate(BaseModel):
