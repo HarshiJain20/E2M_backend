@@ -26,8 +26,8 @@ class Repository(Protocol):
         """Newest first; each row has `photos` (summary fields) and `segment_count`."""
 
     async def get_project(self, project_id: str) -> dict | None:
-        """Row plus `photos` (oldest first, each with `latest_job`), `segments` and
-        `variants` (oldest first, each with `assignments`)."""
+        """Row plus `photos` (oldest first, each with `latest_job`), `segments`,
+        `variants` (oldest first, each with `assignments`) and `rate_overrides`."""
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None: ...
 
@@ -79,6 +79,11 @@ class Repository(Protocol):
         """Set the material (and colour) of segments in a variant; one row per (variant, segment)."""
 
     async def delete_assignments(self, variant_id: str, segment_ids: list[str]) -> None: ...
+
+    async def upsert_rate_override(self, row: dict) -> None:
+        """A project's own material/labour rate for one material (one row per project+material)."""
+
+    async def delete_rate_override(self, project_id: str, material_id: str) -> None: ...
 
     async def delete_segment_assignments(self, segment_id: str) -> None:
         """Remove a segment's material in every variant (e.g. after it is relabelled)."""

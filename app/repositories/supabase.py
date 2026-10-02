@@ -70,7 +70,8 @@ class SupabaseRepository:
             "projects",
             params={
                 "id": f"eq.{project_id}",
-                "select": "*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*))",
+                "select": "*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*)),"
+                          "project_rate_overrides(*)",
                 "photos.order": "created_at.asc",
                 "design_variants.order": "created_at.asc",
                 "photos.jobs.order": "created_at.desc",
@@ -88,6 +89,7 @@ class SupabaseRepository:
         for variant in variants:
             variant["assignments"] = variant.pop("segment_materials", [])
         row["variants"] = variants
+        row["rate_overrides"] = row.pop("project_rate_overrides", [])
         return row
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None:
@@ -211,3 +213,14 @@ class SupabaseRepository:
 
     async def delete_segment_assignments(self, segment_id: str) -> None:
         await self._request("DELETE", "segment_materials", params={"segment_id": f"eq.{segment_id}"})
+
+    async def upsert_rate_override(self, row: dict) -> None:
+        await self._request(
+            "POST", "project_rate_overrides", params={"on_conflict": "project_id,material_id"}, json=row,
+            headers={"Prefer": "resolution=merge-duplicates"},
+        )
+
+    async def delete_rate_override(self, project_id: str, material_id: str) -> None:
+        await self._request("DELETE", "project_rate_overrides", params={
+            "project_id": f"eq.{project_id}", "material_id": f"eq.{material_id}",
+        })

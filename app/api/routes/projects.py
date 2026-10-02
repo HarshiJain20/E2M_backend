@@ -20,7 +20,7 @@ from app.core.deps import get_repository, get_storage
 from app.domain import MAX_PHOTOS_PER_PROJECT
 from app.repositories.base import Repository
 from app.schemas.project import PhotoOut, ProjectDetail, ProjectSummary, ProjectUpdate
-from app.services.measurement import measure_photo
+from app.services.measurement import measure_project
 from app.services.photos import primary_changes, project_status, whole_house_totals
 from app.services.pipeline import recover_interrupted, run_analysis, start_analysis
 from app.services.storage import Storage, StorageError
@@ -50,13 +50,7 @@ async def project_detail(project: dict, storage: Storage) -> ProjectDetail:
     urls = await storage.signed_urls(
         [path for p in photos for path in (p["working_image_path"], p["thumbnail_path"])]
     )
-    raw_by_photo: dict[str, list[dict]] = {}
-    for segment in project["segments"]:
-        raw_by_photo.setdefault(str(segment["photo_id"]), []).append(segment)
-    segments_by_photo, scales = {}, {}
-    for photo in photos:
-        key = str(photo["id"])
-        segments_by_photo[key], scales[key] = measure_photo(photo, raw_by_photo.get(key, []))
+    segments_by_photo, scales = measure_project(project)
     cover = _cover(photos)
     return ProjectDetail(
         id=project["id"],

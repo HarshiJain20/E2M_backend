@@ -52,18 +52,21 @@ def test_list_flattens_segment_counts():
 def test_get_project_embeds_photos_with_latest_job_and_segments():
     row = {"id": "p1", "photos": [{"id": "ph1", "jobs": [{"id": "j2"}]}, {"id": "ph2", "jobs": []}],
            "segments": [{"id": "s1"}],
-           "design_variants": [{"id": "v1", "name": "Design A", "segment_materials": [{"segment_id": "s1"}]}]}
+           "design_variants": [{"id": "v1", "name": "Design A", "segment_materials": [{"segment_id": "s1"}]}],
+           "project_rate_overrides": [{"material_id": "m1", "material_rate": 99}]}
     calls, transport = recorder(lambda r: httpx.Response(200, json=[row]))
 
     project = asyncio.run(SupabaseRepository(SETTINGS, "t", transport=transport).get_project("p1"))
 
     params = calls[0].url.params
     assert params["id"] == "eq.p1"
-    assert params["select"] == "*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*))"
+    assert params["select"] == ("*,photos(*,jobs(*)),segments(*),design_variants(*,segment_materials(*)),"
+                                "project_rate_overrides(*)")
     assert params["photos.jobs.order"] == "created_at.desc" and params["photos.jobs.limit"] == "1"
     assert [p["latest_job"] for p in project["photos"]] == [{"id": "j2"}, None]
     assert project["segments"] == [{"id": "s1"}]
     assert project["variants"] == [{"id": "v1", "name": "Design A", "assignments": [{"segment_id": "s1"}]}]
+    assert project["rate_overrides"] == [{"material_id": "m1", "material_rate": 99}]
 
 
 def test_project_hidden_by_rls_is_none():

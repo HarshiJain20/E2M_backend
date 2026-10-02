@@ -27,6 +27,7 @@ class MemoryStore:
         self.segments: dict[str, dict] = {}
         self.variants: dict[str, dict] = {}
         self.assignments: dict[tuple[str, str], dict] = {}  # (variant_id, segment_id) → row
+        self.rate_overrides: dict[tuple[str, str], dict] = {}  # (project_id, material_id) → row
 
     def drop_assignments(self, keep) -> None:
         """Mimic ON DELETE CASCADE from segments / variants to segment_materials."""
@@ -98,6 +99,7 @@ class MemoryRepository:
             for v in sorted(self._store.variants.values(), key=lambda v: v["created_at"])
             if v["project_id"] == row["id"]
         ]
+        row["rate_overrides"] = [copy.deepcopy(r) for (pid, _), r in self._store.rate_overrides.items() if pid == row["id"]]
         return row
 
     async def update_project(self, project_id: str, fields: dict) -> dict | None:
@@ -116,6 +118,8 @@ class MemoryRepository:
             for key in [k for k, v in table.items() if v["project_id"] == project_id]:
                 del table[key]
         self._store.drop_assignments(lambda a: a["variant_id"] in self._store.variants)
+        for key in [k for k in self._store.rate_overrides if k[0] == project_id]:
+            del self._store.rate_overrides[key]
         return True
 
     # ── Photos ──
@@ -304,3 +308,14 @@ class MemoryRepository:
         if self._owned_segment(segment_id) is None:
             return
         self._store.drop_assignments(lambda a: a["segment_id"] != str(segment_id))
+
+    async def upsert_rate_override(self, row: dict) -> None:
+        if self._owned(row["project_id"]) is None:
+            raise RepositoryError("new row violates row-level security policy", 403, "42501")
+        key = (str(row["project_id"]), str(row["material_id"]))
+        existing = self._store.rate_overrides.get(key, {"id": str(uuid.uuid4())})
+        self._store.rate_overrides[key] = {**existing, **copy.deepcopy(row), "project_id": key[0], "material_id": key[1]}
+
+    async def delete_rate_override(self, project_id: str, material_id: str) -> None:
+        if self._owned(project_id) is not None:
+            self._store.rate_overrides.pop((str(project_id), str(material_id)), None)

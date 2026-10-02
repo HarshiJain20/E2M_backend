@@ -158,3 +158,15 @@ def measure_photo(photo: dict, segments: list[dict]) -> tuple[list[dict], Scale]
         wall["openings_sqm"] = round(wall["openings_sqm"], 2)
         wall["net_area_sqm"] = round(max(wall["area_sqm"] - wall["openings_sqm"], 0.0), 2)
     return measured, scale
+
+
+def measure_project(project: dict) -> tuple[dict[str, list[dict]], dict[str, Scale]]:
+    """Measured segments and the scale used, per photo id."""
+    raw_by_photo: dict[str, list[dict]] = {}
+    for segment in project["segments"]:
+        raw_by_photo.setdefault(str(segment["photo_id"]), []).append(segment)
+    segments_by_photo, scales = {}, {}
+    for photo in project["photos"]:
+        key = str(photo["id"])
+        segments_by_photo[key], scales[key] = measure_photo(photo, raw_by_photo.get(key, []))
+    return segments_by_photo, scales

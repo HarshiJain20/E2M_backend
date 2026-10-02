@@ -38,7 +38,7 @@ Then run [`supabase/seed_materials.sql`](supabase/seed_materials.sql) to load th
 (safe to re-run; it updates rates in place).
 
 **Already ran an earlier `schema.sql`?** Run the files in `supabase/migrations/` you have not run
-yet, in order (`002_photos.sql`, `003_measurement.sql`, `004_materials.sql`), then `seed_materials.sql`.
+yet, in order (`002_photos.sql` … `005_estimate.sql`), then `seed_materials.sql`.
 
 ### Material catalog
 
@@ -143,6 +143,9 @@ request layer, so they run offline.
 | PATCH / DELETE | `/api/v1/variants/{id}` | Rename / delete a design |
 | PUT | `/api/v1/variants/{id}/assignments` | Apply a material (and paint colour) to regions: `segment_ids`, `material_id`, `color` |
 | DELETE | `/api/v1/variants/{id}/assignments?segment_ids=…` | Remove the material from regions |
+| GET | `/api/v1/projects/{id}/estimate` | Quantities and cost for every design |
+| PUT / DELETE | `/api/v1/projects/{id}/rates/{material_id}` | Set (`material_rate`, `labor_rate`) / reset this project's rate for a material |
+| PATCH | `/api/v1/projects/{id}/estimate-settings` | `{"include_gst": true/false}` |
 | GET | `/api/v1/jobs/{id}` | Job status and progress |
 
 **How sizes are measured** (`app/services/measurement.py`): sizes are recomputed from each
@@ -151,6 +154,13 @@ standard door height 2.1 m (else window height 1.2 m) → depth model distance �
 assumed 10 m distance (flagged). A region you measured exactly uses your size instead.
 Walls are reported net of the windows and doors inside them.
 Surfaces are treated as facing the camera, so photos taken at an angle under-estimate area.
+
+**How the estimate is calculated** (`app/services/estimate.py`), per design and material:
+quantity = measured size × (1 + wastage); material cost = quantity × material rate; labour cost =
+measured size × labour rate (no labour on offcuts). Purchase quantities: paint litres and cans
+(+ primer at 0.09 L/m²), cement-paint bags, tile/slab and sheet counts. Category totals, subtotal,
+optional GST (`pricing.gst_rate`, 18%), grand total. Only counted photos are included; regions
+without a material are reported. Rates come from the catalog unless changed for the project.
 
 **Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).
 Each side has exactly one *counted* (primary) photo; whole-house totals add up the counted photos

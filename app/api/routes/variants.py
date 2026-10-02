@@ -1,12 +1,15 @@
 """Materials catalog and design variants (requirement 5.3)."""
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.concurrency import run_in_threadpool
 
 from app.api.routes.projects import owned_project, project_detail
 from app.core.deps import get_repository, get_storage
 from app.repositories.base import Repository, RepositoryError
 from app.schemas.project import AssignmentIn, MaterialOut, ProjectDetail, VariantCreate, VariantUpdate
+from app.services.measurement import focal_length_px, measure_project
+from app.services.render import render_design
 from app.services.storage import Storage
 
 router = APIRouter(tags=["materials"])
@@ -122,3 +125,27 @@ async def clear_material(
     variant = await _owned_variant(variant_id, repo)
     await repo.delete_assignments(str(variant_id), [str(s) for s in segment_ids])
     return await project_detail(await owned_project(str(variant["project_id"]), repo), storage)
+
+
+@router.get("/variants/{variant_id}/render/{photo_id}", response_class=Response,
+            responses={200: {"content": {"image/jpeg": {}}}})
+async def render_variant(
+    variant_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> Response:
+    """The photo redesigned with this design's materials (requirement 5.4). Rendered on request."""
+    variant = await _owned_variant(variant_id, repo)
+    project = await owned_project(str(variant["project_id"]), repo)
+    photo = next((p for p in project["photos"] if str(p["id"]) == str(photo_id)), None)
+    if photo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found in this project.")
+    segments_by_photo, scales = measure_project(project)
+    materials = {str(m["id"]): m for m in await repo.list_materials()}
+    image = await storage.get(photo["working_image_path"])
+    jpeg = await run_in_threadpool(
+        render_design, image, segments_by_photo[str(photo_id)], variant["assignments"], materials,
+        scales[str(photo_id)], focal_length_px(photo),
+    )
+    return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})

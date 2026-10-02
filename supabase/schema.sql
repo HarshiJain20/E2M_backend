@@ -16,6 +16,7 @@ create table if not exists public.projects (
   id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
   name       text not null check (char_length(name) between 1 and 120),
+  estimate_settings jsonb not null default '{}'::jsonb,  -- e.g. {"include_gst": true}
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
