@@ -34,6 +34,9 @@ Open Supabase Dashboard → **SQL Editor** → **New query**, paste the whole of
 Security policies, the private `project-images` bucket and its storage policies. It is safe to run
 again after changes.
 
+**Already ran an earlier `schema.sql`?** Run the files in `supabase/migrations/` you have not run
+yet, in order (e.g. `002_photos.sql`), instead of `schema.sql`.
+
 ### 2. Install and configure
 
 ```bash
@@ -89,8 +92,8 @@ Pair it with the frontend running `VITE_AUTH_DISABLED=true`.
 
 ## Changing the schema
 
-Edit `supabase/schema.sql` (keep it re-runnable: `create table if not exists`,
-`drop policy if exists`) or add a new SQL file under `supabase/`, and run it in the SQL Editor.
+Update `supabase/schema.sql` (the full schema for fresh setups) **and** add a numbered upgrade
+file under `supabase/migrations/` for existing databases; run the upgrade in the SQL Editor.
 
 ## Tests
 
@@ -106,10 +109,18 @@ request layer, so they run offline.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/health`, `/api/v1/health` | Liveness |
-| POST | `/api/v1/projects` | Upload photo (multipart `image`, optional `name`), start analysis |
-| GET | `/api/v1/projects` | List my projects |
-| GET | `/api/v1/projects/{id}` | Project, signed image URLs, latest job, segments |
+| POST | `/api/v1/projects` | Create a project from 1–8 photos (multipart `images`, matching `elevations`, optional `name`); analyses each |
+| POST | `/api/v1/projects/{id}/photos` | Add more photos (same fields) |
+| GET | `/api/v1/projects` | List my projects (cover photo, photo and region counts, status) |
+| GET | `/api/v1/projects/{id}` | Project, photos (signed URLs, latest job, regions) and whole-house totals |
 | PATCH | `/api/v1/projects/{id}` | Rename |
-| DELETE | `/api/v1/projects/{id}` | Delete project and its photos |
-| POST | `/api/v1/projects/{id}/analyze` | Re-run analysis (409 if one is running) |
+| DELETE | `/api/v1/projects/{id}` | Delete project and all its photos |
+| PATCH | `/api/v1/photos/{id}` | Change side (`elevation`) or make it the counted photo (`is_primary: true`) |
+| DELETE | `/api/v1/photos/{id}` | Remove a photo (409 for the last one) |
+| POST | `/api/v1/photos/{id}/analyze` | Re-run analysis for a photo (409 if one is running) |
 | GET | `/api/v1/jobs/{id}` | Job status and progress |
+
+**Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).
+Each side has exactly one *counted* (primary) photo; whole-house totals add up the counted photos
+only, so two photos of the same wall are never added together. If a whole upload contains an
+unusable photo, nothing is saved and the `422` response lists each problem photo with guidance.
