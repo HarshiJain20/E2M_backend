@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────
+# E2M Backend — Python Dependencies
+# ─────────────────────────────────────────────
+
+# ── Core Framework ──
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+python-multipart==0.0.*          # multipart/form-data image uploads
+
+# ── Database (Supabase Postgres) ──
+sqlalchemy==2.0.*
+alembic==1.15.*
+asyncpg==0.30.*                  # async PostgreSQL driver
+psycopg2-binary==2.9.*           # sync PostgreSQL driver (Alembic migrations)
+
+# ── Validation & Serialization ──
+pydantic==2.11.*
+pydantic-settings==2.9.*
+
+# ── HTTP Client (ai-geometry + Supabase Storage) ──
+httpx==0.28.*
+
+# ── Auth (Supabase JWT verification via JWKS) ──
+pyjwt[crypto]==2.10.*
+
+# ── Image handling & quality checks ──
+Pillow==11.*
+numpy==2.*
+
+# ── PDF Report Generation (Phase 7) ──
+reportlab==4.4.*
+
+# ── Cost Engine Utilities ──
+pyyaml==6.0.*                    # SOR YAML config parsing
+
+# ── Dev & Testing ──
+pytest==8.*
+pytest-asyncio==0.25.*
+aiosqlite==0.21.*                # in-memory DB for tests
