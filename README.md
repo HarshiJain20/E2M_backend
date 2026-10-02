@@ -143,6 +143,8 @@ request layer, so they run offline.
 | PATCH / DELETE | `/api/v1/variants/{id}` | Rename / delete a design |
 | PUT | `/api/v1/variants/{id}/assignments` | Apply a material (and paint colour) to regions: `segment_ids`, `material_id`, `color` |
 | DELETE | `/api/v1/variants/{id}/assignments?segment_ids=…` | Remove the material from regions |
+| GET | `/api/v1/variants/{id}/render/{photo_id}` | Redesign preview (JPEG): materials drawn at real size over the photo |
+| GET / POST | `/api/v1/variants/{id}/photoreal/{photo_id}` | Stored AI render for the current materials / create it on the AI service |
 | GET | `/api/v1/projects/{id}/estimate` | Quantities and cost for every design |
 | PUT / DELETE | `/api/v1/projects/{id}/rates/{material_id}` | Set (`material_rate`, `labor_rate`) / reset this project's rate for a material |
 | PATCH | `/api/v1/projects/{id}/estimate-settings` | `{"include_gst": true/false}` |
@@ -161,6 +163,13 @@ measured size × labour rate (no labour on offcuts). Purchase quantities: paint 
 (+ primer at 0.09 L/m²), cement-paint bags, tile/slab and sheet counts. Category totals, subtotal,
 optional GST (`pricing.gst_rate`, 18%), grand total. Only counted photos are included; regions
 without a material are reported. Rates come from the catalog unless changed for the project.
+
+**How the redesign is made** (`app/services/render.py`, `textures.py`): each region with a
+material is re-surfaced with a procedural texture drawn at real-world size (from the photo's scale),
+multiplied by the photo's own shading; windows and doors are restored from the original. The
+optional photorealistic mode sends that draft and a mask to the AI service (SDXL inpainting +
+ControlNet) and stores the result, keyed by a hash of the draft so it is only shown for the exact
+design it was made from.
 
 **Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).
 Each side has exactly one *counted* (primary) photo; whole-house totals add up the counted photos

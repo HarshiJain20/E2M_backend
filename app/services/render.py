@@ -98,3 +98,40 @@ def render_design(
     buffer = io.BytesIO()
     Image.fromarray((np.clip(result, 0, 1) * 255).round().astype(np.uint8)).save(buffer, format="JPEG", quality=88)
     return buffer.getvalue()
+
+
+def region_mask_png(segments: list[dict], assignments: list[dict], width: int, height: int) -> bytes:
+    """White where a material is applied (minus windows and doors), black elsewhere."""
+    assigned = {str(a["segment_id"]) for a in assignments}
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    for segment in segments:
+        if str(segment["id"]) in assigned:
+            draw.polygon([(x * width, y * height) for x, y in segment["polygon"]], fill=255)
+    for segment in segments:
+        if segment["label"] in OPENINGS:
+            draw.polygon([(x * width, y * height) for x, y in segment["polygon"]], fill=0)
+    buffer = io.BytesIO()
+    mask.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+PART_NAMES = {"wall": "main walls", "parapet": "parapet wall", "pillar": "pillars", "balcony": "balcony",
+              "railing": "balcony railing"}
+
+
+def photoreal_prompt(segments: list[dict], assignments: list[dict], materials_by_id: dict[str, dict]) -> str:
+    """Describe each re-surfaced part in words, e.g. "main walls: natural sandstone cladding"."""
+    labels = {str(s["id"]): s["label"] for s in segments}
+    parts: dict[str, str] = {}
+    for a in assignments:
+        label = labels.get(str(a["segment_id"]))
+        material = materials_by_id.get(str(a["material_id"]))
+        if label and material:
+            description = material.get("render_prompt") or material["name"]
+            if a.get("color") and material.get("colorable"):
+                description += f" in colour {a['color']}"
+            parts.setdefault(PART_NAMES.get(label, label), description)
+    described = "; ".join(f"{part}: {text}" for part, text in parts.items())
+    return (f"Photograph of a residential house exterior after renovation. {described}. "
+            "Photorealistic, natural daylight, realistic material texture, sharp detail, same camera angle.")

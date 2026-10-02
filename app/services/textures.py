@@ -21,7 +21,7 @@ def smooth_noise(height: int, width: int, cell_px: float, rng: np.random.Generat
     """Value noise in [-1, 1] with features about `cell_px` pixels wide."""
     gh, gw = max(2, int(height / max(cell_px, 1)) + 2), max(2, int(width / max(cell_px, 1)) + 2)
     grid = rng.uniform(-1, 1, (gh, gw)).astype(np.float32)
-    image = Image.fromarray(grid, mode="F").resize((width, height), Image.Resampling.BICUBIC)
+    image = Image.fromarray(grid).resize((width, height), Image.Resampling.BICUBIC)
     return np.clip(np.asarray(image), -1, 1)
 
 
@@ -57,7 +57,9 @@ def tiled(height, width, ppm, rgb, rng, *, unit_w_m, unit_h_m, joint_mm, joint_r
     # One brightness / tint offset per tile, looked up by (row, col).
     tile_id = ((row.astype(np.int64) * 7919 + col.astype(np.int64) * 104729) % 9973).astype(np.int64)
     shades = rng.uniform(-variation, variation, 9973).astype(np.float32)
-    tints = rng.uniform(-variation / 3, variation / 3, (9973, 3)).astype(np.float32)
+    # Mostly brightness variation; only a faint warm/cool drift so tiles stay one material.
+    drift = rng.uniform(-1, 1, 9973).astype(np.float32) * variation * 0.12
+    tints = np.stack([drift, drift * 0.4, -drift * 0.6], axis=1)
     colour = rgb * (1 + shades[tile_id])[..., None] + tints[tile_id]
     colour *= 1 + grain * smooth_noise(height, width, max(1.5, grain_m * ppm), rng)[..., None]
     if speckle:
@@ -142,11 +144,11 @@ def material_texture(material: dict, color: str | None, height: int, width: int,
     if key == "stone-sandstone":
         return tiled(height, width, ppm, rgb, rng, unit_w_m=size.get("tile_w_m", 0.6),
                      unit_h_m=size.get("tile_h_m", 0.3), joint_mm=7, joint_rgb=rgb * 0.62, bond="running",
-                     variation=0.14, grain=0.1, grain_m=0.03), None
+                     variation=0.08, grain=0.09, grain_m=0.03), None
     if key == "tile-ceramic-elevation":
         return tiled(height, width, ppm, rgb, rng, unit_w_m=size.get("tile_w_m", 0.45),
                      unit_h_m=size.get("tile_h_m", 0.3), joint_mm=8, joint_rgb=GROUT_LIGHT, bond="running",
-                     variation=0.12, grain=0.05, grain_m=0.02), None
+                     variation=0.06, grain=0.05, grain_m=0.02), None
     if category == "tiles":
         return tiled(height, width, ppm, rgb, rng, unit_w_m=size.get("tile_w_m", 0.6),
                      unit_h_m=size.get("tile_h_m", 0.3), joint_mm=3, joint_rgb=GROUT_LIGHT,

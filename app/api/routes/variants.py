@@ -7,9 +7,13 @@ from fastapi.concurrency import run_in_threadpool
 from app.api.routes.projects import owned_project, project_detail
 from app.core.deps import get_repository, get_storage
 from app.repositories.base import Repository, RepositoryError
-from app.schemas.project import AssignmentIn, MaterialOut, ProjectDetail, VariantCreate, VariantUpdate
+from app.schemas.project import AssignmentIn, MaterialOut, PhotorealOut, ProjectDetail, VariantCreate, VariantUpdate
 from app.services.measurement import focal_length_px, measure_project
-from app.services.render import render_design
+import hashlib
+import posixpath
+
+from app.services import ai_geometry
+from app.services.render import photoreal_prompt, region_mask_png, render_design
 from app.services.storage import Storage
 
 router = APIRouter(tags=["materials"])
@@ -127,6 +131,23 @@ async def clear_material(
     return await project_detail(await owned_project(str(variant["project_id"]), repo), storage)
 
 
+async def _draft(variant_id: uuid.UUID, photo_id: uuid.UUID, repo: Repository, storage: Storage):
+    """Everything a render needs: the photo, its measured regions, materials and the overlay draft."""
+    variant = await _owned_variant(variant_id, repo)
+    project = await owned_project(str(variant["project_id"]), repo)
+    photo = next((p for p in project["photos"] if str(p["id"]) == str(photo_id)), None)
+    if photo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found in this project.")
+    segments_by_photo, scales = measure_project(project)
+    segments = segments_by_photo[str(photo_id)]
+    materials = {str(m["id"]): m for m in await repo.list_materials()}
+    image = await storage.get(photo["working_image_path"])
+    jpeg = await run_in_threadpool(
+        render_design, image, segments, variant["assignments"], materials, scales[str(photo_id)], focal_length_px(photo),
+    )
+    return variant, photo, segments, materials, image, jpeg
+
+
 @router.get("/variants/{variant_id}/render/{photo_id}", response_class=Response,
             responses={200: {"content": {"image/jpeg": {}}}})
 async def render_variant(
@@ -136,16 +157,51 @@ async def render_variant(
     storage: Storage = Depends(get_storage),
 ) -> Response:
     """The photo redesigned with this design's materials (requirement 5.4). Rendered on request."""
-    variant = await _owned_variant(variant_id, repo)
-    project = await owned_project(str(variant["project_id"]), repo)
-    photo = next((p for p in project["photos"] if str(p["id"]) == str(photo_id)), None)
-    if photo is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found in this project.")
-    segments_by_photo, scales = measure_project(project)
-    materials = {str(m["id"]): m for m in await repo.list_materials()}
-    image = await storage.get(photo["working_image_path"])
-    jpeg = await run_in_threadpool(
-        render_design, image, segments_by_photo[str(photo_id)], variant["assignments"], materials,
-        scales[str(photo_id)], focal_length_px(photo),
-    )
+    *_, jpeg = await _draft(variant_id, photo_id, repo, storage)
     return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+
+
+def _photoreal_path(photo: dict, variant_id, draft: bytes) -> str:
+    # The draft is deterministic, so its hash changes whenever materials, colours, regions or scale do:
+    # a stored render is only ever shown for exactly the design it was made from.
+    digest = hashlib.sha256(draft).hexdigest()[:20]
+    return f"{posixpath.dirname(photo['working_image_path'])}/renders/{variant_id}-{digest}.jpg"
+
+
+@router.get("/variants/{variant_id}/photoreal/{photo_id}", response_model=PhotorealOut)
+async def get_photoreal(
+    variant_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> PhotorealOut:
+    """The AI render for the current materials, if one has been made."""
+    _, photo, _, _, _, draft = await _draft(variant_id, photo_id, repo, storage)
+    path = _photoreal_path(photo, variant_id, draft)
+    url = (await storage.signed_urls([path])).get(path)
+    return PhotorealOut(status="ready" if url else "none", url=url)
+
+
+@router.post("/variants/{variant_id}/photoreal/{photo_id}", response_model=PhotorealOut)
+async def create_photoreal(
+    variant_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> PhotorealOut:
+    """Make a photorealistic render on the AI service (SDXL + ControlNet) and keep it."""
+    variant, photo, segments, materials, original, draft = await _draft(variant_id, photo_id, repo, storage)
+    path = _photoreal_path(photo, variant_id, draft)
+    existing = (await storage.signed_urls([path])).get(path)
+    if existing:
+        return PhotorealOut(status="ready", url=existing)
+    if not any(str(a["segment_id"]) in {str(s["id"]) for s in segments} for a in variant["assignments"]):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose materials for this photo first.")
+    mask = region_mask_png(segments, variant["assignments"], photo["image_width"], photo["image_height"])
+    prompt = photoreal_prompt(segments, variant["assignments"], materials)
+    try:
+        jpeg = await ai_geometry.render_photoreal(original, draft, mask, prompt, seed=int(path[-24:-4], 16) % 2**31)
+    except ai_geometry.AIGeometryError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    await storage.put(path, jpeg, "image/jpeg")
+    return PhotorealOut(status="ready", url=(await storage.signed_urls([path])).get(path))

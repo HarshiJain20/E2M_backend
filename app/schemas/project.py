@@ -145,6 +145,11 @@ class VariantOut(BaseModel):
     created_at: UtcDatetime
 
 
+class PhotorealOut(BaseModel):
+    status: Literal["ready", "none"]  # none = not rendered yet for the current materials
+    url: str | None = None
+
+
 class ProjectSummary(BaseModel):
     id: uuid.UUID
     name: str

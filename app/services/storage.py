@@ -106,4 +106,5 @@ class LocalStorage:
             self._resolve(path).unlink(missing_ok=True)
 
     async def signed_urls(self, paths: list[str]) -> dict[str, str]:
-        return {path: f"/api/v1/media/{path}" for path in paths}
+        # Like Supabase, only existing files get a URL (callers use this to check existence).
+        return {path: f"/api/v1/media/{path}" for path in paths if self._resolve(path).is_file()}
