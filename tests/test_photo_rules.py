@@ -31,5 +31,5 @@ def test_totals_count_only_primary_photos():
         {"photo_id": "p3", "label": "railing", "measure_type": "length", "length_m": 4.5},
     ]
     totals = {t["label"]: t for t in whole_house_totals(photos, segments)}
-    assert totals["wall"] == {"label": "wall", "measure_type": "area", "total": 70.0, "count": 2}
+    assert totals["wall"] == {"label": "wall", "measure_type": "area", "total": 70.0, "count": 2, "openings_sqm": 0.0}
     assert totals["railing"]["total"] == 4.5

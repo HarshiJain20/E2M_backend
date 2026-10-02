@@ -41,7 +41,7 @@ def _segment_row(photo: dict, item: dict) -> dict:
         "area_sqm": item.get("area_sqm"),
         "length_m": item.get("length_m"),
         "scale_source": item.get("scale_source"),
-        "depth_stats": item.get("depth_stats"),
+        "depth_stats": {"median_m": item["depth_m"]} if item.get("depth_m") else None,
     }
 
 
@@ -85,7 +85,12 @@ async def run_analysis(job_id: str, photo: dict, repo: Repository, storage: Stor
                 "segment_count": len(result["segments"]),
             },
         })
-        await repo.update_photo(photo_id, {"status": ProjectStatus.REVIEW})
+        camera = result.get("camera") or {}
+        # New regions replace the old ones, so any reference measurement on them is dropped.
+        await repo.update_photo(photo_id, {
+            "status": ProjectStatus.REVIEW,
+            "measurement": {"focal_length_px": camera.get("focal_length_px"), "focal_source": camera.get("source")},
+        })
     except Exception as exc:  # any failure must end the job, never leave it running
         logger.exception("Analysis job %s failed", job_id)
         message = str(exc) if isinstance(exc, ai_geometry.AIGeometryError) else (

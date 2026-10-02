@@ -57,8 +57,21 @@ class SegmentOut(BaseModel):
     measure_type: str
     area_sqm: float | None
     length_m: float | None
+    net_area_sqm: float | None = None   # walls: area minus the windows/doors inside them
+    openings_sqm: float | None = None   # walls: area of those windows/doors
     scale_source: str | None
     is_confirmed: bool
+
+
+class ScaleOut(BaseModel):
+    source: Literal["user", "reference", "depth", "assumed"]
+    detail: str
+
+
+class ReferenceOut(BaseModel):
+    segment_id: uuid.UUID
+    dimension: Literal["height", "width"]
+    metres: float
 
 
 class PhotoOut(BaseModel):
@@ -77,14 +90,17 @@ class PhotoOut(BaseModel):
     latest_job: JobOut | None = None
     segments: list[SegmentOut] = []
     regions_confirmed: bool = False  # the user reviewed this photo's regions
+    scale: ScaleOut | None = None  # how sizes in this photo were estimated
+    reference: ReferenceOut | None = None  # the user's own measurement, if any
     created_at: UtcDatetime
 
 
 class TotalOut(BaseModel):
     label: str
     measure_type: str
-    total: float
+    total: float  # walls: net of openings
     count: int
+    openings_sqm: float = 0.0
 
 
 class ProjectSummary(BaseModel):
@@ -106,6 +122,13 @@ class ProjectDetail(ProjectSummary):
 
 class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+
+
+class ReferenceIn(BaseModel):
+    """The user's measurement of one region, which sets the scale for the whole photo."""
+    segment_id: uuid.UUID
+    dimension: Literal["height", "width"]
+    metres: float = Field(gt=0.1, le=100)
 
 
 class SegmentUpdate(BaseModel):

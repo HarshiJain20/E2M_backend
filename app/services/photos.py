@@ -37,7 +37,11 @@ def primary_changes(photos: list[dict]) -> tuple[list[str], list[str]]:
 
 
 def whole_house_totals(photos: list[dict], segments: list[dict]) -> list[dict]:
-    """Totals per element type across the primary photo of each elevation."""
+    """Totals per element type across the primary photo of each elevation.
+
+    `segments` are measured (see services.measurement); walls count their net area, i.e.
+    without the windows and doors inside them, which are reported as `openings_sqm`.
+    """
     counted = {str(p["id"]) for p in photos if p["is_primary"]}
     totals: dict[str, dict] = {}
     for segment in segments:
@@ -46,9 +50,16 @@ def whole_house_totals(photos: list[dict], segments: list[dict]) -> list[dict]:
         is_length = segment["measure_type"] == "length"
         entry = totals.setdefault(segment["label"], {
             "label": segment["label"], "measure_type": segment["measure_type"], "total": 0.0, "count": 0,
+            "openings_sqm": 0.0,
         })
-        entry["total"] += (segment.get("length_m") if is_length else segment.get("area_sqm")) or 0.0
+        if is_length:
+            value = segment.get("length_m")
+        else:
+            value = segment.get("net_area_sqm", segment.get("area_sqm"))
+        entry["total"] += value or 0.0
+        entry["openings_sqm"] += segment.get("openings_sqm") or 0.0
         entry["count"] += 1
     for entry in totals.values():
         entry["total"] = round(entry["total"], 2)
+        entry["openings_sqm"] = round(entry["openings_sqm"], 2)
     return list(totals.values())

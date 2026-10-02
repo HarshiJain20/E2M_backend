@@ -112,7 +112,8 @@ class MemoryRepository:
             if self._owned(photo["project_id"]) is None:
                 raise RepositoryError("new row violates row-level security policy", 403, "42501")
             row = {"id": str(uuid.uuid4()), "elevation": "front", "is_primary": False, "status": "uploaded",
-                   "image_meta": {}, "quality_report": {}, "created_at": _now(), **copy.deepcopy(photo)}
+                   "image_meta": {}, "quality_report": {}, "measurement": {}, "created_at": _now(),
+                   **copy.deepcopy(photo)}
             row["id"], row["project_id"] = str(row["id"]), str(row["project_id"])
             self._store.photos[row["id"]] = row
             created.append(row)

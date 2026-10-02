@@ -1,0 +1,39 @@
+{
+  "app": {
+    "name": "E2M Backend",
+    "debug": false,
+    "host": "0.0.0.0",
+    "port": 8000,
+    "cors_origins": [
+      "http://localhost:3000",
+      "http://localhost:5173"
+    ]
+  },
+  "supabase": {
+    "url": "https://<project-ref>.supabase.co",
+    "publishable_key": "sb_publishable_...",
+    "storage_bucket": "project-images",
+    "signed_url_ttl_seconds": 3600
+  },
+  "auth": {
+    "disabled": false,
+    "jwt_audience": "authenticated"
+  },
+  "ai_geometry": {
+    "url": "http://localhost:8100",
+    "api_key": "",
+    "timeout_seconds": 300
+  },
+  "storage": {
+    "backend": "supabase",
+    "upload_dir": "./uploads",
+    "max_file_size_mb": 20,
+    "working_image_max_side": 2048,
+    "thumbnail_max_side": 480
+  },
+  "pricing": {
+    "labor_cess_rate": 0.01,
+    "gst_rate": 0.18,
+    "default_wastage_factor": 0.1
+  }
+}

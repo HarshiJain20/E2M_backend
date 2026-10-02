@@ -28,12 +28,8 @@ async def relabel_segment(
     storage: Storage = Depends(get_storage),
 ) -> ProjectDetail:
     segment = await _owned_segment(segment_id, repo)
-    fields: dict = {"label": payload.label}
-    new_type = measure_type(payload.label)
-    if new_type != segment["measure_type"]:
-        # An area cannot become a length (or the reverse); it is re-measured in the measurement step.
-        fields.update(measure_type=new_type, area_sqm=None, length_m=None)
-    await repo.update_segment(str(segment_id), fields)
+    # Sizes are recomputed from the outline on every read, so only the label and type change.
+    await repo.update_segment(str(segment_id), {"label": payload.label, "measure_type": measure_type(payload.label)})
     return await project_detail(await owned_project(str(segment["project_id"]), repo), storage)
 
 
@@ -45,4 +41,9 @@ async def delete_segment(
 ) -> ProjectDetail:
     segment = await _owned_segment(segment_id, repo)
     await repo.delete_segment(str(segment_id))
+    # A measurement that referred to this region no longer applies.
+    photo = await repo.get_photo(str(segment["photo_id"]))
+    measurement = (photo or {}).get("measurement") or {}
+    if str((measurement.get("reference") or {}).get("segment_id")) == str(segment_id):
+        await repo.update_photo(str(segment["photo_id"]), {"measurement": {**measurement, "reference": None}})
     return await project_detail(await owned_project(str(segment["project_id"]), repo), storage)

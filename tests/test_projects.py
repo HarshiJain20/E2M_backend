@@ -47,7 +47,9 @@ def test_several_photos_get_sides_in_order_and_each_is_analysed(client, geometry
     assert all(p["is_primary"] for p in project["photos"])
     assert len(geometry_calls) == 3
     totals = {t["label"]: t for t in project["totals"]}
-    assert totals["wall"]["total"] == 42.5 * 3  # one wall per side
+    one_wall = next(s for s in project["photos"][0]["segments"] if s["label"] == "wall")["net_area_sqm"]
+    assert one_wall > 0
+    assert totals["wall"]["total"] == round(one_wall * 3, 2)  # one wall per side
     assert totals["railing"]["measure_type"] == "length"
 
 
@@ -66,7 +68,8 @@ def test_two_photos_of_same_side_are_not_double_counted(client):
 
     assert [p["is_primary"] for p in project["photos"]] == [True, False]
     wall = next(t for t in project["totals"] if t["label"] == "wall")
-    assert wall["total"] == 42.5 and wall["count"] == 1
+    counted_wall = next(s for s in project["photos"][0]["segments"] if s["label"] == "wall")
+    assert wall["total"] == counted_wall["net_area_sqm"] and wall["count"] == 1
 
 
 def test_one_bad_photo_rejects_the_whole_upload_with_per_photo_guidance(client, geometry_calls):

@@ -120,9 +120,17 @@ request layer, so they run offline.
 | DELETE | `/api/v1/photos/{id}` | Remove a photo (409 for the last one) |
 | POST | `/api/v1/photos/{id}/analyze` | Re-run analysis for a photo (409 if one is running) |
 | POST | `/api/v1/photos/{id}/confirm` | Mark the photo's regions as reviewed |
+| PUT | `/api/v1/photos/{id}/reference` | Your measurement of one region (`segment_id`, `dimension`: height/width, `metres`) — rescales the photo |
+| DELETE | `/api/v1/photos/{id}/reference` | Remove your measurement |
 | PATCH | `/api/v1/segments/{id}` | Change what a region is (`label`) |
 | DELETE | `/api/v1/segments/{id}` | Delete a wrong region |
 | GET | `/api/v1/jobs/{id}` | Job status and progress |
+
+**How sizes are measured** (`app/services/measurement.py`): sizes are recomputed from each
+region's outline on every read, using one scale per photo, best source first — your measurement →
+standard door height 2.1 m (else window height 1.2 m) → depth model distance ÷ focal length →
+assumed 10 m distance (flagged). Walls are reported net of the windows and doors inside them.
+Surfaces are treated as facing the camera, so photos taken at an angle under-estimate area.
 
 **Photos and totals:** each photo shows one side of the house (front, left, right, rear, other).
 Each side has exactly one *counted* (primary) photo; whole-house totals add up the counted photos

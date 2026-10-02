@@ -37,6 +37,7 @@ create table if not exists public.photos (
   image_height        integer not null check (image_height > 0),
   image_meta          jsonb not null default '{}'::jsonb,
   quality_report      jsonb not null default '{}'::jsonb,
+  measurement         jsonb not null default '{}'::jsonb,  -- focal length, user reference measurement
   created_at          timestamptz not null default now()
 );
 create index if not exists photos_project_id_idx on public.photos (project_id, created_at);

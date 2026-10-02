@@ -7,7 +7,7 @@ from app.api.routes.projects import apply_primary_rule, owned_project, project_d
 from app.core.deps import get_repository, get_storage
 from app.domain import JobStatus
 from app.repositories.base import Repository
-from app.schemas.project import JobOut, PhotoUpdate, ProjectDetail
+from app.schemas.project import JobOut, PhotoUpdate, ProjectDetail, ReferenceIn
 from app.services.pipeline import recover_interrupted, run_analysis, start_analysis
 from app.services.storage import Storage, StorageError
 
@@ -68,6 +68,35 @@ async def delete_photo(
         pass  # orphaned files are harmless; the photo record is gone
     await apply_primary_rule(await owned_project(project_id, repo), repo)
     return await project_detail(await owned_project(project_id, repo), storage)
+
+
+@router.put("/{photo_id}/reference", response_model=ProjectDetail)
+async def set_reference(
+    photo_id: uuid.UUID,
+    payload: ReferenceIn,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> ProjectDetail:
+    """Use the user's measurement of one region to scale every size in this photo."""
+    photo = await _owned_photo(photo_id, repo)
+    segment = await repo.get_segment(str(payload.segment_id))
+    if segment is None or str(segment["photo_id"]) != str(photo_id):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose a region from this photo.")
+    measurement = {**(photo.get("measurement") or {}), "reference": payload.model_dump(mode="json")}
+    await repo.update_photo(str(photo_id), {"measurement": measurement})
+    return await project_detail(await owned_project(str(photo["project_id"]), repo), storage)
+
+
+@router.delete("/{photo_id}/reference", response_model=ProjectDetail)
+async def clear_reference(
+    photo_id: uuid.UUID,
+    repo: Repository = Depends(get_repository),
+    storage: Storage = Depends(get_storage),
+) -> ProjectDetail:
+    photo = await _owned_photo(photo_id, repo)
+    measurement = {**(photo.get("measurement") or {}), "reference": None}
+    await repo.update_photo(str(photo_id), {"measurement": measurement})
+    return await project_detail(await owned_project(str(photo["project_id"]), repo), storage)
 
 
 @router.post("/{photo_id}/confirm", response_model=ProjectDetail)
