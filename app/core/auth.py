@@ -23,15 +23,17 @@ bearer = HTTPBearer(auto_error=False)
 class CurrentUser:
     id: uuid.UUID
     email: str | None = None
+    # Forwarded to Supabase so Row Level Security applies to this user. Empty in dev bypass.
+    access_token: str = ""
 
 
 @lru_cache
 def _jwks_client() -> jwt.PyJWKClient:
     settings = get_settings()
-    if not settings.SUPABASE_URL:
-        raise RuntimeError("E2M_SUPABASE_URL is required to verify access tokens")
+    if not settings.supabase.url:
+        raise RuntimeError("supabase.url must be set in config.json to verify access tokens")
     return jwt.PyJWKClient(
-        f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json",
+        f"{settings.supabase.url.rstrip('/')}/auth/v1/.well-known/jwks.json",
         cache_keys=True,
         lifespan=3600,
     )
@@ -52,7 +54,7 @@ def verify_token(token: str) -> dict:
         token,
         signing_key.key,
         algorithms=["ES256", "RS256"],
-        audience=settings.JWT_AUDIENCE,
+        audience=settings.auth.jwt_audience,
     )
 
 
@@ -60,13 +62,17 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
 ) -> CurrentUser:
     settings = get_settings()
-    if settings.AUTH_DISABLED:
-        return CurrentUser(id=uuid.UUID(settings.DEV_USER_ID), email="dev@localhost")
+    if settings.auth.disabled:
+        return CurrentUser(id=uuid.UUID(settings.auth.dev_user_id), email="dev@localhost")
 
     if credentials is None:
         raise _unauthorized("Sign in to continue.")
     try:
         claims = await run_in_threadpool(verify_token, credentials.credentials)
-        return CurrentUser(id=uuid.UUID(claims["sub"]), email=claims.get("email"))
+        return CurrentUser(
+            id=uuid.UUID(claims["sub"]),
+            email=claims.get("email"),
+            access_token=credentials.credentials,
+        )
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise _unauthorized("Your session has expired. Sign in again.") from exc

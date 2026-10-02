@@ -7,17 +7,11 @@ fastapi==0.115.*
 uvicorn[standard]==0.34.*
 python-multipart==0.0.*          # multipart/form-data image uploads
 
-# ── Database (Supabase Postgres) ──
-sqlalchemy==2.0.*
-alembic==1.15.*
-asyncpg==0.30.*                  # async PostgreSQL driver
-psycopg2-binary==2.9.*           # sync PostgreSQL driver (Alembic migrations)
-
 # ── Validation & Serialization ──
 pydantic==2.11.*
 pydantic-settings==2.9.*
 
-# ── HTTP Client (ai-geometry + Supabase Storage) ──
+# ── HTTP Client (Supabase Data API + Storage, ai-geometry) ──
 httpx==0.28.*
 
 # ── Auth (Supabase JWT verification via JWKS) ──
@@ -36,4 +30,3 @@ pyyaml==6.0.*                    # SOR YAML config parsing
 # ── Dev & Testing ──
 pytest==8.*
 pytest-asyncio==0.25.*
-aiosqlite==0.21.*                # in-memory DB for tests

@@ -11,9 +11,9 @@ class AIGeometryError(RuntimeError):
 async def analyze_image(image: bytes, filename: str = "working.jpg") -> dict:
     """Run segmentation, depth and measurement on a working image."""
     settings = get_settings()
-    url = f"{settings.AI_GEOMETRY_URL.rstrip('/')}/v1/analyze"
+    url = f"{settings.ai_geometry.url.rstrip('/')}/v1/analyze"
     try:
-        async with httpx.AsyncClient(timeout=settings.AI_GEOMETRY_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=settings.ai_geometry.timeout_seconds) as client:
             response = await client.post(url, files={"image": (filename, image, "image/jpeg")})
     except httpx.TimeoutException as exc:
         raise AIGeometryError("The analysis service took too long to respond.") from exc

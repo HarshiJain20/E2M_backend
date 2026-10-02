@@ -1,113 +1,130 @@
 """
-Background analysis jobs.
+Background analysis jobs — one per photo.
 
-A job loads the project's working image, sends it to the ai-geometry service, and
-stores the detected segments. Progress is written to the `jobs` row so the frontend
-can poll it. Jobs run in-process; a server restart marks unfinished jobs as failed.
+A job loads the photo's working image, sends it to the ai-geometry service, and stores the
+detected segments. It runs as the user who started it (their repository and storage), so
+Row Level Security applies to the job's writes too. Progress is written to the job row so
+the frontend can poll it.
 """
 import logging
-import uuid
-from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.session import AsyncSessionLocal
-from app.models.models import Job, JobStatus, Project, ProjectStatus, Segment, utcnow
+from app.domain import JobStatus, ProjectStatus
+from app.repositories.base import Repository
 from app.services import ai_geometry
-from app.services.storage import get_storage
+from app.services.storage import Storage
 
 logger = logging.getLogger(__name__)
 
-SessionFactory = Callable[[], AsyncSession]
+INTERRUPTED_MESSAGE = "The analysis was interrupted before it finished. Run it again."
+# A job that is not running in this process and has not progressed for this long is treated
+# as interrupted (for example by a server restart).
+STALE_AFTER = timedelta(minutes=2)
 
-INTERRUPTED_MESSAGE = "The analysis was interrupted by a server restart. Run it again."
-
-
-async def _set_stage(session: AsyncSession, job: Job, stage: str, progress: int) -> None:
-    job.stage = stage
-    job.progress = progress
-    await session.commit()
+RUNNING_JOBS: set[str] = set()
 
 
-def _segment_from_result(project_id: uuid.UUID, item: dict) -> Segment:
-    return Segment(
-        project_id=project_id,
-        label=item["label"],
-        source="auto",
-        confidence=item.get("confidence"),
-        polygon=item["polygon"],
-        bbox=item["bbox"],
-        measure_type=item.get("measure_type", "area"),
-        area_sqm=item.get("area_sqm"),
-        length_m=item.get("length_m"),
-        scale_source=item.get("scale_source"),
-        depth_stats=item.get("depth_stats"),
-    )
+def utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-async def run_analysis(job_id: uuid.UUID, session_factory: SessionFactory = AsyncSessionLocal) -> None:
-    async with session_factory() as session:
-        job = await session.get(Job, job_id)
-        if job is None:
-            return
-        project = await session.get(Project, job.project_id)
-        job.status = JobStatus.RUNNING
-        job.started_at = utcnow()
-        project.status = ProjectStatus.PROCESSING
-        await _set_stage(session, job, "Preparing image", 10)
+def _segment_row(photo: dict, item: dict) -> dict:
+    return {
+        "project_id": str(photo["project_id"]),
+        "photo_id": str(photo["id"]),
+        "label": item["label"],
+        "source": "auto",
+        "confidence": item.get("confidence"),
+        "polygon": item["polygon"],
+        "bbox": item["bbox"],
+        "measure_type": item.get("measure_type", "area"),
+        "area_sqm": item.get("area_sqm"),
+        "length_m": item.get("length_m"),
+        "scale_source": item.get("scale_source"),
+        "depth_stats": item.get("depth_stats"),
+    }
 
-        try:
-            image = await get_storage().get(project.working_image_path)
-            await _set_stage(session, job, "Detecting surfaces and measuring", 30)
-            result = await ai_geometry.analyze_image(image)
 
-            await _set_stage(session, job, "Saving results", 85)
-            await session.execute(
-                delete(Segment).where(Segment.project_id == project.id, Segment.source == "auto")
-            )
-            session.add_all(_segment_from_result(project.id, item) for item in result["segments"])
+async def start_analysis(photo: dict, repo: Repository) -> dict:
+    """Create the job row and mark the photo as processing; the caller schedules run_analysis."""
+    job = await repo.create_job({
+        "project_id": str(photo["project_id"]), "photo_id": str(photo["id"]),
+        "kind": "analyze", "status": JobStatus.QUEUED, "stage": "Queued",
+    })
+    await repo.update_photo(str(photo["id"]), {"status": ProjectStatus.PROCESSING})
+    return job
 
-            job.result_meta = {
+
+async def run_analysis(job_id: str, photo: dict, repo: Repository, storage: Storage) -> None:
+    photo_id = str(photo["id"])
+    RUNNING_JOBS.add(job_id)
+    try:
+        await repo.update_job(job_id, {
+            "status": JobStatus.RUNNING, "started_at": utcnow_iso(), "stage": "Preparing image", "progress": 10,
+        })
+        image = await storage.get(photo["working_image_path"])
+
+        await repo.update_job(job_id, {"stage": "Detecting surfaces and measuring", "progress": 30})
+        result = await ai_geometry.analyze_image(image)
+
+        await repo.update_job(job_id, {"stage": "Saving results", "progress": 85})
+        await repo.replace_auto_segments(photo_id, [_segment_row(photo, s) for s in result["segments"]])
+
+        await repo.update_job(job_id, {
+            "status": JobStatus.SUCCEEDED,
+            "stage": "Complete",
+            "progress": 100,
+            "finished_at": utcnow_iso(),
+            "result_meta": {
                 "mock": result.get("mock", False),
                 "camera": result.get("camera"),
                 "depth": result.get("depth"),
                 "timings_ms": result.get("timings_ms"),
                 "models": result.get("models"),
                 "segment_count": len(result["segments"]),
-            }
-            job.status = JobStatus.SUCCEEDED
-            job.stage = "Complete"
-            job.progress = 100
-            job.finished_at = utcnow()
-            project.status = ProjectStatus.REVIEW
-            await session.commit()
-        except Exception as exc:  # any failure must end the job, never leave it running
-            logger.exception("Analysis job %s failed", job_id)
-            await session.rollback()
-            job = await session.get(Job, job_id)
-            project = await session.get(Project, job.project_id)
-            job.status = JobStatus.FAILED
-            job.error = str(exc) if isinstance(exc, ai_geometry.AIGeometryError) else (
-                "Something went wrong while analysing the photo. Try again."
-            )
-            job.finished_at = utcnow()
-            project.status = ProjectStatus.FAILED
-            await session.commit()
+            },
+        })
+        await repo.update_photo(photo_id, {"status": ProjectStatus.REVIEW})
+    except Exception as exc:  # any failure must end the job, never leave it running
+        logger.exception("Analysis job %s failed", job_id)
+        message = str(exc) if isinstance(exc, ai_geometry.AIGeometryError) else (
+            "Something went wrong while analysing the photo. Try again."
+        )
+        try:
+            await repo.update_job(job_id, {
+                "status": JobStatus.FAILED, "error": message, "finished_at": utcnow_iso(),
+            })
+            await repo.update_photo(photo_id, {"status": ProjectStatus.FAILED})
+        except Exception:
+            logger.exception("Could not record failure of job %s", job_id)
+    finally:
+        RUNNING_JOBS.discard(job_id)
 
 
-async def fail_interrupted_jobs(session_factory: SessionFactory = AsyncSessionLocal) -> int:
-    """Mark jobs left queued/running by a previous process as failed."""
-    async with session_factory() as session:
-        result = await session.execute(
-            update(Job)
-            .where(Job.status.in_(JobStatus.ACTIVE))
-            .values(status=JobStatus.FAILED, error=INTERRUPTED_MESSAGE, finished_at=utcnow())
-        )
-        await session.execute(
-            update(Project)
-            .where(Project.status == ProjectStatus.PROCESSING)
-            .values(status=ProjectStatus.FAILED)
-        )
-        await session.commit()
-        return result.rowcount or 0
+def _as_datetime(value) -> datetime:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(str(value))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def is_interrupted(job: dict | None, now: datetime | None = None) -> bool:
+    if not job or job["status"] not in JobStatus.ACTIVE or str(job["id"]) in RUNNING_JOBS:
+        return False
+    last_activity = _as_datetime(job.get("started_at") or job["created_at"])
+    return (now or datetime.now(timezone.utc)) - last_activity > STALE_AFTER
+
+
+async def recover_interrupted(project: dict, repo: Repository) -> dict:
+    """Mark photos whose latest job stopped without finishing as failed."""
+    photos = []
+    for photo in project["photos"]:
+        job = photo.get("latest_job")
+        if is_interrupted(job):
+            job = await repo.update_job(str(job["id"]), {
+                "status": JobStatus.FAILED, "error": INTERRUPTED_MESSAGE, "finished_at": utcnow_iso(),
+            }) or job
+            await repo.update_photo(str(photo["id"]), {"status": ProjectStatus.FAILED})
+            photo = {**photo, "latest_job": job, "status": ProjectStatus.FAILED}
+        photos.append(photo)
+    return {**project, "photos": photos}

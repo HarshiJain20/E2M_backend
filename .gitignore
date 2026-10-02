@@ -1,3 +1,7 @@
+# Local configuration with secrets — copy config.example.json
+config.json
+config.*.json
+!config.example.json
 .env
 .venv/
 __pycache__/

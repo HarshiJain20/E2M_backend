@@ -10,5 +10,5 @@ router = APIRouter()
 async def api_health_check() -> dict[str, str]:
     """Confirm that the versioned API is reachable."""
     settings = get_settings()
-    return {"status": "ok", "service": settings.APP_NAME, "version": settings.APP_VERSION}
+    return {"status": "ok", "service": settings.app.name, "version": settings.app.version}
 
