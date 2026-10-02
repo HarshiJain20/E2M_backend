@@ -1,7 +1,10 @@
 # E2M Backend
 
 FastAPI service for the E2M exterior renovation planner. Owns projects, photo uploads, analysis
-jobs and (in later phases) materials, quantities, costs and reports.
+jobs, materials, quantities, costs and the PDF report.
+
+**Project documentation** (architecture, user workflow, how estimation works, limitations,
+open-source licences) is in [`docs/`](docs/README.md).
 
 ## How it talks to Supabase
 

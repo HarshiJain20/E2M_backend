@@ -138,14 +138,21 @@ async def _draft(variant_id: uuid.UUID, photo_id: uuid.UUID, repo: Repository, s
     photo = next((p for p in project["photos"] if str(p["id"]) == str(photo_id)), None)
     if photo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Photo not found in this project.")
-    segments_by_photo, scales = measure_project(project)
-    segments = segments_by_photo[str(photo_id)]
+    measured = measure_project(project)
     materials = {str(m["id"]): m for m in await repo.list_materials()}
+    image, jpeg = await render_photo(photo, variant, measured, materials, storage)
+    return variant, photo, measured[0][str(photo_id)], materials, image, jpeg
+
+
+async def render_photo(photo: dict, variant: dict, measured, materials: dict, storage: Storage) -> tuple[bytes, bytes]:
+    """The original photo and its standard redesign for this design."""
+    segments_by_photo, scales = measured
+    key = str(photo["id"])
     image = await storage.get(photo["working_image_path"])
     jpeg = await run_in_threadpool(
-        render_design, image, segments, variant["assignments"], materials, scales[str(photo_id)], focal_length_px(photo),
+        render_design, image, segments_by_photo[key], variant["assignments"], materials, scales[key], focal_length_px(photo),
     )
-    return variant, photo, segments, materials, image, jpeg
+    return image, jpeg
 
 
 @router.get("/variants/{variant_id}/render/{photo_id}", response_class=Response,
@@ -161,7 +168,7 @@ async def render_variant(
     return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
 
 
-def _photoreal_path(photo: dict, variant_id, draft: bytes) -> str:
+def photoreal_path(photo: dict, variant_id, draft: bytes) -> str:
     # The draft is deterministic, so its hash changes whenever materials, colours, regions or scale do:
     # a stored render is only ever shown for exactly the design it was made from.
     digest = hashlib.sha256(draft).hexdigest()[:20]
@@ -177,7 +184,7 @@ async def get_photoreal(
 ) -> PhotorealOut:
     """The AI render for the current materials, if one has been made."""
     _, photo, _, _, _, draft = await _draft(variant_id, photo_id, repo, storage)
-    path = _photoreal_path(photo, variant_id, draft)
+    path = photoreal_path(photo, variant_id, draft)
     url = (await storage.signed_urls([path])).get(path)
     return PhotorealOut(status="ready" if url else "none", url=url)
 
@@ -191,7 +198,7 @@ async def create_photoreal(
 ) -> PhotorealOut:
     """Make a photorealistic render on the AI service (SDXL + ControlNet) and keep it."""
     variant, photo, segments, materials, original, draft = await _draft(variant_id, photo_id, repo, storage)
-    path = _photoreal_path(photo, variant_id, draft)
+    path = photoreal_path(photo, variant_id, draft)
     existing = (await storage.signed_urls([path])).get(path)
     if existing:
         return PhotorealOut(status="ready", url=existing)

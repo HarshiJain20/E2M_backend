@@ -1,7 +1,7 @@
 """Versioned HTTP API composition."""
 from fastapi import APIRouter
 
-from app.api.routes import estimate, health, jobs, photos, projects, segments, variants
+from app.api.routes import estimate, health, jobs, photos, projects, reports, segments, variants
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -10,4 +10,5 @@ api_router.include_router(photos.router)
 api_router.include_router(segments.router)
 api_router.include_router(variants.router)
 api_router.include_router(estimate.router)
+api_router.include_router(reports.router)
 api_router.include_router(jobs.router)
