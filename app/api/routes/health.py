@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.core.config import get_settings
+from app.services import ai_geometry
 
 router = APIRouter()
 
@@ -12,3 +13,9 @@ async def api_health_check() -> dict[str, str]:
     settings = get_settings()
     return {"status": "ok", "service": settings.app.name, "version": settings.app.version}
 
+
+
+@router.get("/health/ai")
+async def ai_health_check() -> dict[str, str]:
+    """Whether the AI service (detection, photorealistic renders) is reachable right now."""
+    return {"status": await ai_geometry.service_status()}

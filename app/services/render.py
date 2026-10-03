@@ -2,7 +2,9 @@
 Redesign preview (requirement 5.4): the user's own photo with the chosen materials applied.
 
 Only the regions that have a material change. Each texture is drawn at real-world scale, then
-multiplied by the photo's own shading (light, shadows, weathering) so it sits in the scene.
+multiplied by the photo's own lighting so it sits in the scene. Only the *broad* lighting is kept
+(shadows, light falloff), averaged over ~half a metre: the old surface's own pattern (tiles,
+bricks, grout lines, stains) must not show through the new material.
 Windows and doors are put back from the original afterwards, so the structure is unchanged.
 """
 import io
@@ -16,6 +18,7 @@ from app.services.textures import material_texture
 
 OPENINGS = ("window", "door")
 SHADE_RANGE = (0.55, 1.45)
+LIGHTING_CELL_M = 0.6  # larger than a tile or brick, smaller than a shadow
 
 
 def _bbox_px(segment: dict, width: int, height: int, pad: int = 2) -> tuple[int, int, int, int]:
@@ -35,6 +38,24 @@ def _mask(segment: dict, box: tuple[int, int, int, int], width: int, height: int
     return np.asarray(image, dtype=np.float32) / 255.0
 
 
+def _lighting(luminance: np.ndarray, weight: np.ndarray, cell_px: float) -> np.ndarray:
+    """Low-frequency brightness: weighted box average on a coarse grid, smoothly upsampled.
+
+    `weight` is 1 on the surface and 0 elsewhere (outside the region, windows, doors), so dark
+    glass or the sky next to a wall does not leak into its lighting.
+    """
+    height, width = luminance.shape
+    grid = (max(1, round(width / cell_px)), max(1, round(height / cell_px)))
+
+    def smooth(values: np.ndarray) -> np.ndarray:
+        small = Image.fromarray(values.astype(np.float32)).resize(grid, Image.Resampling.BOX)
+        return np.asarray(small.resize((width, height), Image.Resampling.BILINEAR), dtype=np.float32)
+
+    total, count = smooth(luminance * weight), smooth(weight)
+    fallback = float((luminance * weight).sum() / max(weight.sum(), 1e-6))
+    return np.where(count > 0.05, total / np.maximum(count, 1e-6), fallback)
+
+
 def _seed(segment_id) -> int:
     return zlib.crc32(str(segment_id).encode())
 
@@ -52,8 +73,15 @@ def render_design(
         photo = ImageOps.exif_transpose(source).convert("RGB")
     width, height = photo.size
     original = np.asarray(photo, dtype=np.float32) / 255.0
-    luminance = np.asarray(photo.convert("L").filter(ImageFilter.GaussianBlur(2)), dtype=np.float32) / 255.0
+    luminance = np.asarray(photo.convert("L"), dtype=np.float32) / 255.0
     result = original.copy()
+
+    # Windows and doors are excluded when reading a wall's lighting.
+    openings = Image.new("L", (width, height), 0)
+    for segment in segments:
+        if segment["label"] in OPENINGS:
+            ImageDraw.Draw(openings).polygon([(x * width, y * height) for x, y in segment["polygon"]], fill=255)
+    surface = 1.0 - np.asarray(openings, dtype=np.float32) / 255.0
 
     by_segment = {str(a["segment_id"]): a for a in assignments}
     targets = [s for s in segments if str(s["id"]) in by_segment
@@ -77,9 +105,13 @@ def render_design(
         texture, alpha = material_texture(material, assignment.get("color"), y1 - y0, x1 - x0,
                                           pixels_per_metre, _seed(segment["id"]))
 
-        # Keep the photo's lighting: relative brightness inside the region scales the texture.
-        light = luminance[y0:y1, x0:x1]
-        shade = np.clip(light / max(float(light[inside].mean()), 1e-3), *SHADE_RANGE) ** 0.85
+        # Keep the photo's broad lighting (not the old surface's pattern) relative to the region's average.
+        weight = inside * surface[y0:y1, x0:x1]
+        if weight.sum() < 1:
+            weight = inside.astype(np.float32)
+        light = _lighting(luminance[y0:y1, x0:x1], weight, LIGHTING_CELL_M * pixels_per_metre)
+        average = float((light * weight).sum() / weight.sum())
+        shade = np.clip(light / max(average, 1e-3), *SHADE_RANGE) ** 0.85
         coverage = mask if alpha is None else mask * alpha
         region = result[y0:y1, x0:x1]
         result[y0:y1, x0:x1] = region * (1 - coverage[..., None]) + np.clip(texture * shade[..., None], 0, 1) * coverage[..., None]

@@ -65,6 +65,29 @@ def test_photo_lighting_is_kept():
     assert after[300, 200].mean() > after[300, 600].mean() + 25          # bright side stays brighter
 
 
+def test_old_tiles_do_not_show_through_new_paint():
+    # The wall is covered in 30 cm tiles with dark 2 cm grout lines (1 px = 1 cm).
+    array = np.full((H, W, 3), 170, dtype=np.uint8)
+    array[::30, :] = 40
+    array[:, ::30] = 40
+    buffer = io.BytesIO()
+    Image.fromarray(array).save(buffer, format="PNG")
+
+    after = render([WALL], [paint(WALL, "#c0c0c0")], photo=buffer.getvalue())
+    patch = after[200:400, 200:600].mean(axis=2)
+    assert patch.std() < 4          # flat paint: the grout grid is gone
+
+
+def test_dark_glass_does_not_darken_the_wall_around_a_window():
+    array = np.full((H, W, 3), 180, dtype=np.uint8)
+    array[120:180, 160:240] = 20     # the window (dark glass)
+    buffer = io.BytesIO()
+    Image.fromarray(array).save(buffer, format="PNG")
+
+    after = render([WALL, WINDOW], [paint(WALL, "#c0c0c0")], photo=buffer.getvalue())
+    assert abs(after[150, 260].mean() - after[400, 600].mean()) < 6   # beside the window vs far away
+
+
 def test_no_materials_returns_the_original():
     original = render([WALL], [])
     assert np.abs(original - render([WALL, WINDOW], [])).max() < 1
